@@ -2,7 +2,7 @@
 
 ## 🌐 Демо
 
-🔗 https://ihuliR.github.io/alexey_project/demo/
+🔗 https://ihuliR.github.io/formaslov/demo/
 
 > Интерактивная статическая версия приложения, развёрнутая на GitHub Pages.  
 > Демонстрирует ключевые сценарии работы без серверной части.
