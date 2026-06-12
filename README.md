@@ -1,96 +1,63 @@
-# Text Annotation API + React Frontend (MVP)
+# Formaslov
 
-## 🌐 Демо
+Formaslov is an MVP web application for manual text annotation. Users can sign in with JWT, create or upload text documents, assign labels to selected ranges, and export annotations as JSON.
 
-🔗 https://ihuliR.github.io/formaslov/demo/
+## Stack
 
-> Интерактивная статическая версия приложения, развёрнутая на GitHub Pages.  
-> Демонстрирует ключевые сценарии работы без серверной части.
+- Django, Django REST Framework, Djoser, Simple JWT
+- React (Create React App), Axios
+- SQLite for local development
 
-### 🔐 Данные для входа
+## Repository structure
 
-Для авторизации используйте один из пользователей, указанных в `demo/data/users.json`.
+```text
+backend/   Django project and applications
+frontend/  React application
+docs/      Architecture, API, style, and maintainer guides
+demo/      Static browser-only demo
+```
 
-Пример:
-- **Имя пользователя:** `user`
-- **Пароль:** `user123`
+## Local setup
 
----
-
-## 📖 Описание
-Этот MVP реализует полный сценарий разметки текста с аутентификацией.
-Пользователь может создавать документы вручную или загружать `.txt` файлы.
-Просмотр документа построен на фрагментах (chunks), а разметка выполняется метками по выделенным диапазонам текста.
-Фронтенд поддерживает экспорт аннотаций и метаданных в локальный JSON-файл.
-
-## Технологический стек
-
-- Python + Django + Django REST Framework
-- JWT-аутентификация через Djoser
-- React (Create React App)
-- Axios (с JWT-интерсепторами)
-
-## Требования
-
-- Python 3.12+
-- Node.js 18+ (рекомендуется LTS)
-
-## Установка и запуск (локально)
-
-### A) Бэкенд
+### Backend
 
 ```bash
-python -m venv venv
-source venv/bin/activate
+cd backend
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cd alexey_project/
 python manage.py migrate
 python manage.py runserver
 ```
 
-Базовый URL API:
+The API is available at `http://127.0.0.1:8000/api/v1/`.
 
-```text
-http://127.0.0.1:8000/api/v1/
-```
-
-### B) Фронтенд
+### Frontend
 
 ```bash
-cd frontend/
+cd frontend
 npm install
 npm start
 ```
 
-URL интерфейса:
+The interface is available at `http://localhost:3000`.
 
-```text
-http://localhost:3000
-```
+To override the API URL, create a local `.env` file based on [`.env.example`](.env.example). CRA reads `REACT_APP_API_URL` at build time.
 
-## Аутентификация
+## Main workflows
 
-- Используйте страницу входа в интерфейсе.
-- JWT-эндпоинты (для справки):
-  - `POST /api/v1/jwt/create/`
-  - `POST /api/v1/jwt/refresh/`
+- JWT login and refresh
+- Create a document or upload a UTF-8 `.txt` file
+- Browse document chunks
+- Create and delete labels and annotations
+- Export annotations to JSON in the browser
 
-## Чеклист MVP
+API details and current limitations are documented in [`docs/API_GUIDE.md`](docs/API_GUIDE.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-- Вход в систему
-- Создание документа
-- Загрузка `.txt` (`documents/upload/`)
-- Навигация по фрагментам на странице документа (`documents/{id}/chunks/?page=&page_size=1`)
-- Создание меток
-- Создание/удаление аннотаций
-- Экспорт JSON со страницы документа
+## Static demo
 
-## Устранение неполадок
+The tracked `demo/` directory contains a browser-only version that uses local JSON data and does not require the Django backend.
 
-- CORS: бэкенд должен разрешать `http://localhost:3000`.
-- Если вход не работает: проверьте, что бэкенд запущен и учетные данные существуют.
-- Если UI показывает `Network or server error`: откройте DevTools -> Network и проверьте HTTP-статусы.
+## License
 
-## Лицензия
-
-Лицензия MIT.
+MIT
