@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import api from '../api/api';
 import ErrorMessage from '../components/ErrorMessage';
-import Header from '../components/Header';
 import Loader from '../components/Loader';
 
-const getErrorMessage = (error) => {
-  if (error?.response?.data) {
-    return JSON.stringify(error.response.data);
+const getErrorMessage = (error, fallback) => {
+  const detail = error?.response?.data?.detail;
+
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail;
   }
-  return 'Network or server error';
+
+  return fallback;
 };
 
 function LabelsPage() {
@@ -34,7 +36,12 @@ function LabelsPage() {
         }
       } catch (requestError) {
         if (!cancelled) {
-          setError(getErrorMessage(requestError));
+          setError(
+            getErrorMessage(
+              requestError,
+              'Не удалось загрузить метки. Попробуйте ещё раз.'
+            )
+          );
         }
       } finally {
         if (!cancelled) {
@@ -72,7 +79,12 @@ function LabelsPage() {
         await refreshLabels();
       }
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      setError(
+        getErrorMessage(
+          requestError,
+          'Не удалось создать метку. Попробуйте ещё раз.'
+        )
+      );
     } finally {
       setCreating(false);
     }
@@ -86,7 +98,17 @@ function LabelsPage() {
       await api.delete(`labels/${labelId}/`);
       await refreshLabels();
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      if (requestError?.response?.status === 409) {
+        setError(
+          getErrorMessage(
+            requestError,
+            'Нельзя удалить метку: она используется в аннотациях.'
+          )
+        );
+        return;
+      }
+
+      setError('Не удалось удалить метку. Попробуйте ещё раз.');
     } finally {
       setDeletingId(null);
     }
@@ -94,7 +116,6 @@ function LabelsPage() {
 
   return (
     <div className="page">
-      <Header />
       <main className="container">
         <section className="card">
           <h1 className="page-title">Метки</h1>

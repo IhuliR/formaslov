@@ -99,7 +99,7 @@
         view.hidden = false;
         missing.hidden = true;
 
-        title.textContent = doc.title || ('Документ #' + doc.id);
+        title.textContent = doc.title || 'Новый документ';
         created.textContent = utils.formatDate(doc.created_at);
 
         utils.clearNode(tags);

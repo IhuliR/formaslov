@@ -1,15 +1,34 @@
 import axios from 'axios';
+import {
+  clearTokens,
+  getAccessToken,
+  getRefreshToken,
+  saveAccessToken,
+} from '../auth/tokenStorage';
 
-const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000/api/v1/',
-});
+const baseURL =
+  process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000/api/v1/';
 
-const redirectToLogin = () => {
-  window.location.href = '/login';
+const api = axios.create({ baseURL });
+const authApi = axios.create({ baseURL });
+
+let unauthorizedHandler = null;
+
+export const setUnauthorizedHandler = (handler) => {
+  unauthorizedHandler = handler;
+};
+
+const handleUnauthorized = () => {
+  clearTokens();
+  if (unauthorizedHandler) {
+    unauthorizedHandler();
+    return;
+  }
+  window.location.assign('/login');
 };
 
 api.interceptors.request.use((config) => {
-  const accessToken = localStorage.getItem('access_token');
+  const accessToken = getAccessToken();
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
@@ -25,32 +44,41 @@ api.interceptors.response.use(
 
     const originalRequest = error.config;
 
+    if (error.response.status === 401 && !originalRequest) {
+      handleUnauthorized();
+      return Promise.reject(error);
+    }
+
+    if (error.response.status === 401 && originalRequest?._retry) {
+      handleUnauthorized();
+      return Promise.reject(error);
+    }
+
     if (error.response.status === 401 && !originalRequest?._retry) {
       originalRequest._retry = true;
-      const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = getRefreshToken();
 
       if (!refreshToken) {
-        localStorage.clear();
-        redirectToLogin();
+        handleUnauthorized();
         return Promise.reject(error);
       }
 
       try {
-        const refreshResponse = await api.post('jwt/refresh/', {
+        const refreshResponse = await authApi.post('jwt/refresh/', {
           refresh: refreshToken,
         });
+        const access = refreshResponse.data?.access;
 
-        if (refreshResponse.status === 201 && refreshResponse.data?.access) {
-          localStorage.setItem('access_token', refreshResponse.data.access);
-          return api(originalRequest);
+        if (!access) {
+          handleUnauthorized();
+          return Promise.reject(error);
         }
 
-        localStorage.clear();
-        redirectToLogin();
-        return Promise.reject(error);
+        saveAccessToken(access);
+        originalRequest.headers.Authorization = `Bearer ${access}`;
+        return api(originalRequest);
       } catch (refreshError) {
-        localStorage.clear();
-        redirectToLogin();
+        handleUnauthorized();
         return Promise.reject(refreshError);
       }
     }
@@ -58,5 +86,41 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+export const createTokenPair = async (username, password) => {
+  const response = await authApi.post('jwt/create/', { username, password });
+  const { access, refresh } = response.data || {};
+
+  if (!access || !refresh) {
+    throw new Error('Сервер не вернул JWT-токены.');
+  }
+
+  return { access, refresh };
+};
+
+export const verifyAccessToken = (token) =>
+  authApi.post('jwt/verify/', { token });
+
+export const refreshAccessToken = async (refresh) => {
+  const response = await authApi.post('jwt/refresh/', { refresh });
+  const access = response.data?.access;
+
+  if (!access) {
+    throw new Error('Сервер не вернул новый access-токен.');
+  }
+
+  return access;
+};
+
+export const registerUser = (username, password) =>
+  authApi.post('users/', { username, password });
+
+export const getCurrentUser = async () => {
+  const response = await api.get('users/me/');
+  return response.data;
+};
+
+export const changePassword = (passwords) =>
+  api.post('users/set_password/', passwords);
 
 export default api;

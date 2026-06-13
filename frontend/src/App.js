@@ -1,28 +1,60 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+} from 'react-router-dom';
+import { AuthProvider } from './auth/AuthContext';
+import Layout from './components/Layout';
 import PrivateRoute from './components/PrivateRoute';
+import PublicOnlyRoute from './components/PublicOnlyRoute';
+import AccountPage from './pages/AccountPage';
+import DemoPage from './pages/DemoPage';
 import DocumentPage from './pages/DocumentPage';
 import DocumentsPage from './pages/DocumentsPage';
 import LabelsPage from './pages/LabelsPage';
+import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
 import './styles/App.css';
 
-function App() {
-  const hasToken = Boolean(localStorage.getItem('access_token'));
+function AuthenticatedApp() {
+  return (
+    <AuthProvider>
+      <Outlet />
+    </AuthProvider>
+  );
+}
 
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route element={<AuthenticatedApp />}>
+        <Route element={<Layout />}>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/demo" element={<DemoPage />} />
+          <Route element={<PublicOnlyRoute />}>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+          </Route>
+          <Route element={<PrivateRoute />}>
+            <Route path="/documents" element={<DocumentsPage />} />
+            <Route path="/documents/:id" element={<DocumentPage />} />
+            <Route path="/labels" element={<LabelsPage />} />
+            <Route path="/account" element={<AccountPage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Route>
+    </Routes>
+  );
+}
+
+function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route element={<PrivateRoute />}>
-          <Route path="/documents" element={<DocumentsPage />} />
-          <Route path="/documents/:id" element={<DocumentPage />} />
-          <Route path="/labels" element={<LabelsPage />} />
-        </Route>
-        <Route
-          path="/"
-          element={<Navigate to={hasToken ? '/documents' : '/login'} replace />}
-        />
-      </Routes>
+      <AppRoutes />
     </BrowserRouter>
   );
 }

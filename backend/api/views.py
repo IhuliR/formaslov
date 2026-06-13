@@ -1,5 +1,7 @@
 import re
+from pathlib import Path
 
+from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -38,8 +40,7 @@ class TextDocumentViewSet(viewsets.ModelViewSet):
     def chunks(self, request, pk=None):
         document = self.get_document(pk)
 
-        # Normalize newlines to \n for consistent offsets across OS
-        content = (document.content or "").replace("\r\n", "\n").replace("\r", "\n")
+        content = document.content or ""
 
         # Find "paragraph blocks": text separated by one or more blank lines
         # Skips empty chunks but keeps correct absolute offsets.
@@ -144,24 +145,66 @@ class TextDocumentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        document = TextDocument.objects.create(
+        content = content.replace('\r\n', '\n').replace('\r', '\n')
+        serializer = self.get_serializer(data={
+            'title': Path(uploaded_file.name).stem,
+            'original_filename': uploaded_file.name,
+            'content': content,
+        })
+        serializer.is_valid(raise_exception=True)
+        document = serializer.save(
             user=request.user,
-            title=uploaded_file.name,
-            content=content
         )
 
-        serializer = self.get_serializer(document)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(
+            self.get_serializer(document).data,
+            status=status.HTTP_201_CREATED
+        )
 
 
 class LabelViewSet(viewsets.ModelViewSet):
     queryset = Label.objects.all()
     serializer_class = LabelSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsAuthor]
+
+    def get_queryset(self):
+        return self.queryset.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        label = self.get_object()
+
+        try:
+            self.perform_destroy(label)
+        except ProtectedError:
+            annotations_count = label.annotation_set.count()
+            annotations_word = (
+                'аннотации'
+                if annotations_count % 10 == 1
+                and annotations_count % 100 != 11
+                else 'аннотациях'
+            )
+            return Response(
+                {
+                    'detail': (
+                        f'Нельзя удалить метку «{label.name}»: она '
+                        f'используется в {annotations_count} '
+                        f'{annotations_word}. '
+                        'Сначала удалите или измените эти аннотации.'
+                    ),
+                    'code': 'label_in_use',
+                    'annotations_count': annotations_count,
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AnnotationViewSet(viewsets.ModelViewSet):
-    queryset = Annotation.objects.select_related('document')
+    queryset = Annotation.objects.select_related('document', 'label')
     serializer_class = AnnotationSerializer
     permission_classes = [IsAuthenticated, IsAuthor]
 
@@ -171,12 +214,3 @@ class AnnotationViewSet(viewsets.ModelViewSet):
         if document_id:
             qs = qs.filter(document_id=document_id)
         return qs
-
-    def perform_create(self, serializer):
-        document = serializer.validated_data['document']
-        start = serializer.validated_data['start']
-        end = serializer.validated_data['end']
-        content = document.content
-        selected_text = content[start:end]
-
-        serializer.save(text=selected_text)

@@ -87,13 +87,16 @@
       var item = utils.el('article', 'doc-card');
 
       var top = utils.el('div', 'doc-card-top');
-      var titleLink = utils.el('a', 'doc-title', doc.title || ('Документ #' + doc.id));
+      var titleLink = utils.el('a', 'doc-title', doc.title || 'Новый документ');
       titleLink.href = 'document.html?id=' + encodeURIComponent(String(doc.id));
       var created = utils.el('span', 'doc-date', utils.formatDate(doc.created_at));
       top.appendChild(titleLink);
       top.appendChild(created);
 
       var meta = utils.el('div', 'doc-meta');
+      if (doc.slug) {
+        meta.appendChild(utils.el('span', 'meta-pill', doc.slug));
+      }
       meta.appendChild(utils.el('span', 'meta-pill', 'Аннотации: ' + (annotationCountMap[doc.id] || 0)));
 
       var chips = utils.el('div', 'chip-row');

@@ -10,13 +10,23 @@ Backend API проекта Formaslov построен на Django REST Framework
 /api/v1/
 ```
 
-Все основные endpoints, кроме получения JWT-токенов, требуют авторизации.
+Все основные endpoints, кроме регистрации и получения JWT-токенов, требуют
+авторизации.
+
+Публичная страница `/demo` не является API endpoint. Она работает на
+статических frontend-данных и не читает и не изменяет документы, метки или
+аннотации в базе.
 
 Формат авторизации:
 
 ```http
 Authorization: Bearer <access_token>
 ```
+
+Ресурсы `/documents/`, `/labels/` и `/annotations/` требуют JWT для всех
+операций list/create/retrieve/update/delete. Queryset каждого ресурса
+ограничен текущим пользователем: документы и метки связаны с ним напрямую,
+аннотации — через владельца документа.
 
 Актуальный роутинг задаётся в:
 
@@ -39,13 +49,110 @@ Authorization: Bearer <access_token>
 
 ## 2. Аутентификация
 
-JWT endpoints подключены через Djoser/Simple JWT:
+Регистрация и JWT endpoints подключены через Djoser/Simple JWT:
 
 ```python
+path('v1/', include('djoser.urls'))
 path('v1/', include('djoser.urls.jwt'))
 ```
 
-### 2.1. Получить пару токенов
+### 2.1. Регистрация
+
+```http
+POST /api/v1/users/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "username": "user",
+  "password": "strong-password"
+}
+```
+
+Response `201 Created` содержит созданного пользователя без пароля.
+Endpoint предоставляется Djoser и доступен без JWT. Frontend после успешной
+регистрации перенаправляет пользователя на `/login`.
+
+### 2.2. Получить текущего пользователя
+
+```http
+GET /api/v1/users/me/
+Authorization: Bearer <access_token>
+```
+
+Response `200 OK`:
+
+```json
+{
+  "id": 1,
+  "username": "ilya"
+}
+```
+
+Endpoint предоставляется Djoser и требует JWT. Пароль, hash пароля и лишние
+профильные поля в ответ не включаются.
+
+### 2.3. Изменить пароль
+
+```http
+POST /api/v1/users/set_password/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "current_password": "old-password",
+  "new_password": "new-strong-password",
+  "re_new_password": "new-strong-password"
+}
+```
+
+Response при успехе:
+
+```http
+204 No Content
+```
+
+Endpoint предоставляется Djoser. В `DJOSER` включён
+`SET_PASSWORD_RETYPE`, поэтому оба поля нового пароля обязательны. Djoser:
+
+- проверяет текущий пароль;
+- проверяет совпадение `new_password` и `re_new_password`;
+- применяет стандартные Django password validators;
+- меняет пароль через модель пользователя;
+- не возвращает и не записывает пароль в API-ответ.
+
+Примеры `400 Bad Request`:
+
+```json
+{
+  "current_password": ["Invalid password."]
+}
+```
+
+```json
+{
+  "non_field_errors": ["The two password fields didn't match."]
+}
+```
+
+```json
+{
+  "new_password": ["This password is too common."]
+}
+```
+
+Frontend преобразует эти ответы в короткие русскоязычные сообщения. При
+успешной смене пароля текущие JWT access/refresh tokens не удаляются, поэтому
+пользователь остаётся авторизованным.
+
+### 2.4. Получить пару токенов
 
 ```http
 POST /api/v1/jwt/create/
@@ -72,7 +179,7 @@ Response:
 
 Frontend не должен жёстко полагаться на конкретный HTTP status этого endpoint. В текущем коде `LoginPage` проверяет наличие `access` и `refresh`, а не status.
 
-### 2.2. Обновить access token
+### 2.5. Обновить access token
 
 ```http
 POST /api/v1/jwt/refresh/
@@ -95,7 +202,7 @@ Response:
 }
 ```
 
-### 2.3. Проверить token
+### 2.6. Проверить token
 
 ```http
 POST /api/v1/jwt/verify/
@@ -124,9 +231,15 @@ Request:
 |---|---|---|
 | `id` | integer | ID документа |
 | `user` | integer/string | Владелец документа, read-only |
-| `title` | string | Название документа, необязательное |
+| `title` | string | Человекочитаемое название документа |
+| `slug` | string | Технический slug, read-only, уникален в рамках пользователя |
+| `original_filename` | string | Исходное имя загруженного файла, если применимо |
 | `content` | string | Полный текст документа |
 | `created_at` | datetime | Дата создания, read-only |
+
+Если `title` пустой, backend использует имя файла без расширения из
+`original_filename`, а затем fallback `Новый документ`. `slug` генерируется
+backend через `python-slugify`; frontend не передаёт и не управляет им.
 
 Текущее важное ограничение: `TextDocumentViewSet` использует `parser_classes = [MultiPartParser]`, поэтому create/update документов выполняются через `multipart/form-data`.
 
@@ -155,7 +268,9 @@ Response:
     {
       "id": 1,
       "user": 1,
-      "title": "Example",
+      "title": "Тёзка",
+      "slug": "tezka",
+      "original_filename": "",
       "content": "Text...",
       "created_at": "2026-01-01T00:00:00Z"
     }
@@ -177,8 +292,13 @@ Form fields:
 
 | Поле | Обязательное | Описание |
 |---|---:|---|
-| `title` | нет | Название документа |
+| `title` | нет | Название документа; при пустом значении используется fallback |
+| `original_filename` | нет | Исходное имя файла, например `Тёзка.txt` |
 | `content` | да | Текст документа |
+
+Переносы строк в `content` нормализуются при сохранении: `\r\n` и `\r`
+преобразуются в `\n`. Это обеспечивает единые offsets для просмотра,
+аннотаций и экспорта.
 
 Response `201 Created`:
 
@@ -186,7 +306,9 @@ Response `201 Created`:
 {
   "id": 1,
   "user": 1,
-  "title": "Example",
+  "title": "Тёзка",
+  "slug": "tezka",
+  "original_filename": "",
   "content": "Text...",
   "created_at": "2026-01-01T00:00:00Z"
 }
@@ -205,7 +327,9 @@ Response:
 {
   "id": 1,
   "user": 1,
-  "title": "Example",
+  "title": "Тёзка",
+  "slug": "tezka",
+  "original_filename": "Тёзка.txt",
   "content": "Text...",
   "created_at": "2026-01-01T00:00:00Z"
 }
@@ -226,7 +350,12 @@ Form fields:
 | Поле | Обязательное | Описание |
 |---|---:|---|
 | `title` | нет | Новое название |
+| `original_filename` | нет | Новое исходное имя файла |
 | `content` | нет | Новый текст |
+
+Если `title` изменился, backend автоматически пересоздаёт `slug`, сохраняя
+уникальность в рамках текущего пользователя. URL документа продолжает
+использовать числовой `id`.
 
 Response:
 
@@ -235,6 +364,8 @@ Response:
   "id": 1,
   "user": 1,
   "title": "Updated title",
+  "slug": "updated-title",
+  "original_filename": "",
   "content": "Updated text...",
   "created_at": "2026-01-01T00:00:00Z"
 }
@@ -276,7 +407,10 @@ Backend-поведение:
 - если файла нет — `400`, `{"detail": "Файл не найден."}`;
 - если расширение не `.txt` — `400`, `{"detail": "Только .txt файлы разрешены."}`;
 - если файл не читается как UTF-8 — `400`, `{"detail": "Ошибка при чтении файла. Проверьте кодировку."}`;
-- при успехе создаётся `TextDocument`, где `title = uploaded_file.name`, `content = decoded file content`.
+- при успехе создаётся `TextDocument`, где `title` равен имени файла без
+  расширения, `original_filename` хранит полное исходное имя, а `slug`
+  генерируется автоматически;
+- переносы строк `\r\n` и `\r` в прочитанном тексте сохраняются как `\n`.
 
 Response `201 Created`:
 
@@ -284,7 +418,9 @@ Response `201 Created`:
 {
   "id": 1,
   "user": 1,
-  "title": "example.txt",
+  "title": "example",
+  "slug": "example",
+  "original_filename": "example.txt",
   "content": "File content...",
   "created_at": "2026-01-01T00:00:00Z"
 }
@@ -304,7 +440,9 @@ Query parameters:
 | `page` | integer | `1` | Номер страницы chunks, начиная с 1 |
 | `page_size` | integer | `1` | Количество chunks в ответе |
 
-Backend делит документ на блоки текста, разделённые пустыми строками. Переносы строк нормализуются к `\n`.
+Backend делит сохранённый `document.content` на блоки текста, разделённые
+пустыми строками. `chunk_start` и `chunk_end` всегда относятся к исходной
+сохранённой строке без дополнительного преобразования в chunk endpoint.
 
 Response для одного chunk:
 
@@ -356,7 +494,7 @@ Response для пустого документа:
 
 ## 4. Labels API
 
-Ресурс меток управляет списком доступных labels.
+Ресурс меток управляет личным списком labels текущего пользователя.
 
 Модель: `backend/core/models.py` (`core.models.Label`).
 
@@ -368,7 +506,10 @@ Response для пустого документа:
 | `name` | string | Название метки |
 | `color` | string | HEX-цвет, например `#ffff00` |
 
-Текущее поведение: метки глобальные, не привязаны к пользователю.
+Каждая метка принадлежит пользователю. Поле владельца не принимается и не
+возвращается API: backend определяет владельца по JWT. Имя метки уникально
+только в рамках одного пользователя, поэтому разные пользователи могут создать
+метки с одинаковым названием.
 
 ### 4.1. Список меток
 
@@ -388,6 +529,9 @@ Response:
   }
 ]
 ```
+
+Пользователь получает только свои метки. Запрос конкретной чужой метки
+возвращает `404 Not Found`.
 
 ### 4.2. Создать метку
 
@@ -415,6 +559,8 @@ Response `201 Created`:
   "color": "#ffff00"
 }
 ```
+
+При повторном имени у того же пользователя возвращается `400 Bad Request`.
 
 ### 4.3. Получить метку
 
@@ -453,7 +599,19 @@ Response:
 204 No Content
 ```
 
-Важно: `Annotation.label` использует `on_delete=PROTECT`. Если метка используется в аннотациях, удаление может завершиться ошибкой.
+Если метка используется в аннотациях, backend сохраняет метку и связанные
+аннотации и возвращает `409 Conflict`:
+
+```json
+{
+  "detail": "Нельзя удалить метку «зло»: она используется в 7 аннотациях. Сначала удалите или измените эти аннотации.",
+  "code": "label_in_use",
+  "annotations_count": 7
+}
+```
+
+`Annotation.label` продолжает использовать `on_delete=PROTECT`: связанные
+аннотации не удаляются автоматически.
 
 ## 5. Annotations API
 
@@ -507,6 +665,11 @@ GET /api/v1/annotations/?document=1
 Authorization: Bearer <access_token>
 ```
 
+При создании или обновлении аннотации поля `document` и `label` принимают
+только объекты текущего пользователя. Чужой ID обрабатывается как невалидное
+значение поля и возвращает `400 Bad Request` без раскрытия существования
+объекта.
+
 Response — массив аннотаций только для указанного документа и только в рамках документов текущего пользователя.
 
 ### 5.3. Создать аннотацию
@@ -524,9 +687,14 @@ Request:
   "document": 1,
   "label": 1,
   "start": 0,
-  "end": 10
+  "end": 10,
+  "text": "Selected t"
 }
 ```
+
+Frontend может передавать `text` для явного отображения своего контракта, но
+backend не доверяет этому значению и всегда вычисляет сохранённый текст как
+`document.content[start:end]`.
 
 Response `201 Created`:
 
@@ -548,7 +716,14 @@ Backend сам вычисляет поле `text`:
 selected_text = document.content[start:end]
 ```
 
-Критически важно для будущих правок: при создании аннотации нужно валидировать, что `document` принадлежит текущему пользователю, а также что `start/end` находятся в границах документа.
+При создании и обновлении backend проверяет:
+
+- документ принадлежит текущему пользователю;
+- метка принадлежит текущему пользователю;
+- `start >= 0`;
+- `start < end`;
+- `end <= len(document.content)`;
+- выбранный фрагмент не состоит только из пробелов и переносов строк.
 
 ### 5.4. Получить аннотацию
 
@@ -577,7 +752,8 @@ Request:
 }
 ```
 
-Важно: при изменении `start/end` нужно пересчитать `text`. В текущей реализации это стоит проверить отдельно, потому что `perform_create` явно считает `text`, а update-логика отдельно не переопределена.
+При изменении `document`, `start` или `end` backend повторно вычисляет `text`
+по актуальным координатам.
 
 ### 5.6. Удалить аннотацию
 
@@ -633,14 +809,23 @@ Response format:
 
 Frontend ожидает следующие API-особенности:
 
-1. `jwt/create/` возвращает `access` и `refresh`.
-2. Все защищённые endpoints принимают `Authorization: Bearer <token>`.
-3. `documents/` возвращает limit/offset pagination.
-4. Создание и обновление документов принимают `FormData`.
-5. `documents/upload/` принимает `.txt` файл в поле `file`.
-6. `documents/{id}/chunks/` возвращает `chunk`, `chunk_start`, `chunk_end`, `has_next`, `has_prev`, `total_chunks`, `chunk_index`.
-7. `annotations/` принимает абсолютные offsets и возвращает сохранённую аннотацию.
-8. `labels/` возвращает массив меток без пагинации.
+1. `users/` принимает `username` и `password` для регистрации.
+2. `jwt/create/` возвращает `access` и `refresh`.
+3. Все защищённые endpoints принимают `Authorization: Bearer <token>`.
+4. `documents/` возвращает limit/offset pagination.
+5. Создание и обновление документов принимают `FormData`.
+6. React-форма читает `.txt` через `FileReader` и отправляет результат как
+   `content`, имя файла как `original_filename` и редактируемый `title` в
+   `documents/`; отдельный `documents/upload/` endpoint продолжает принимать
+   `.txt` файл в поле `file`.
+7. `documents/{id}/chunks/` возвращает `chunk`, `chunk_start`, `chunk_end`, `has_next`, `has_prev`, `total_chunks`, `chunk_index`.
+8. `annotations/` принимает абсолютные offsets и возвращает сохранённую аннотацию.
+9. `labels/` возвращает массив меток без пагинации.
+10. Frontend экспортирует schema v2 с полным `document.content`; текст каждой
+   аннотации повторно вычисляется через `document.content.slice(start, end)`.
+   Метаданные документа включают `title`, `slug` и `original_filename`, а имя
+   файла формируется как `{slug}_export.json` с fallback
+   `document_{id}_export.json`.
 
 ## 9. Известные расхождения и зоны риска
 
@@ -653,18 +838,6 @@ Frontend ожидает следующие API-особенности:
 - JWT status codes нужно проверить по фактическому поведению Djoser/Simple JWT;
 - `annotations/?document=<id>` отсутствует/неочевиден в schema;
 - endpoints документов фактически используют `multipart/form-data` из-за `MultiPartParser`.
-
-### 9.2. Permissions для `Annotation`
-
-`IsAuthor` сейчас проверяет `obj.user == request.user`. Для `Annotation` владельца нужно проверять через `obj.document.user`.
-
-### 9.3. Создание аннотаций
-
-Нужно убедиться, что пользователь не может создать аннотацию к чужому документу.
-
-### 9.4. Глобальные метки
-
-Нужно явно решить: метки — общий справочник или личные метки пользователя. От этого зависит модель данных, permissions и API.
 
 ## 10. Правила обновления API
 

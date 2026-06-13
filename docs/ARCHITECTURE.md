@@ -99,7 +99,9 @@ class MyUser(AbstractUser):
 Поля:
 
 - `user` — владелец документа;
-- `title` — название, необязательное;
+- `title` — человекочитаемое название;
+- `slug` — техническое транслитерированное имя, уникальное в рамках владельца;
+- `original_filename` — исходное имя загруженного файла;
 - `content` — полный текст документа;
 - `created_at` — дата создания.
 
@@ -113,12 +115,15 @@ class MyUser(AbstractUser):
 
 Поля:
 
+- `user` — владелец метки;
 - `name` — название метки;
 - `color` — HEX-цвет, по умолчанию `#ffff00`.
 
-Текущее поведение: метки глобальные для всех пользователей. У модели нет связи с `user`.
+Связи и ограничения:
 
-Это нужно явно учитывать: если проект должен быть многопользовательским, нужно решить, остаются ли метки глобальным справочником или становятся пользовательскими.
+- `User -> Label`: one-to-many через `related_name='labels'`;
+- имя метки уникально в рамках пользователя;
+- одинаковые названия разрешены у разных пользователей.
 
 #### `Annotation`
 
@@ -150,6 +155,7 @@ API находится в приложении `backend/api`.
 /api/v1/documents/
 /api/v1/labels/
 /api/v1/annotations/
+/api/v1/users/
 /api/v1/jwt/create/
 /api/v1/jwt/refresh/
 /api/v1/jwt/verify/
@@ -164,6 +170,10 @@ API находится в приложении `backend/api`.
 - `AnnotationSerializer`
 
 Важная особенность: поле `Annotation.text` read-only. При создании аннотации frontend отправляет `document`, `label`, `start`, `end`; backend сам вычисляет `text = document.content[start:end]`.
+
+`AnnotationSerializer` ограничивает queryset полей `document` и `label`
+объектами текущего пользователя. Поэтому чужие ID отклоняются до сохранения и
+не раскрывают наличие чужого объекта.
 
 ### `backend/api/views.py`
 
@@ -187,10 +197,11 @@ CRUD меток.
 Текущее поведение:
 
 - доступ только для авторизованных пользователей;
-- метки не фильтруются по пользователю;
-- любой авторизованный пользователь видит и может менять глобальный список меток.
-
-Это либо осознанная модель “общего справочника меток”, либо место для будущего исправления.
+- queryset фильтруется по `user=request.user`;
+- при создании владелец выставляется из `request.user`;
+- пользователь может получать, менять и удалять только свои метки;
+- используемая аннотациями метка защищена `PROTECT`, удаление возвращает
+  `409 Conflict`.
 
 #### `AnnotationViewSet`
 
@@ -211,14 +222,22 @@ React-приложение лежит в `frontend/`.
 ### Основные маршруты
 
 ```text
+/                     public landing
+/demo                 public read-only demo
 /login
+/register
 /documents
 /documents/:id
 /labels
-/
+/account
 ```
 
-`/` перенаправляет пользователя на `/documents`, если в `localStorage` есть `access_token`, иначе на `/login`.
+`/` всегда показывает публичную приветственную страницу. `/demo` использует
+только статические frontend-данные и доступен без JWT. Для авторизованного
+пользователя на landing отображается кнопка перехода к документам. `/login` и
+`/register` перенаправляют уже авторизованного пользователя на `/documents`.
+Рабочие маршруты, включая `/account`, ждут завершения проверки JWT и затем либо
+отображают страницу, либо перенаправляют на `/login`.
 
 ### API-клиент
 
@@ -240,7 +259,48 @@ React-приложение лежит в `frontend/`.
 
 - отправляет `username` и `password` на `jwt/create/`;
 - сохраняет `access` и `refresh` в `localStorage`;
-- перекидывает пользователя на `/documents`.
+- перекидывает пользователя на `/documents`;
+- содержит обычную ссылку на публичный read-only `/demo`.
+
+#### `RegisterPage`
+
+- отправляет `username` и `password` на `users/`;
+- проверяет повтор пароля на frontend;
+- после успешной регистрации перекидывает пользователя на `/login`.
+
+#### `LandingPage`
+
+- публично объясняет основной сценарий Formaslov;
+- ведёт на регистрацию и вход;
+- ведёт на read-only `/demo` без выполнения login.
+
+#### `DemoPage`
+
+- доступна без JWT;
+- отображает статический документ, метки и подсвеченные аннотации;
+- не читает и не изменяет demo-данные через backend;
+- для анонимного пользователя показывает регистрацию и вход;
+- для авторизованного пользователя показывает рабочую навигацию и переход к
+  личным документам;
+- не содержит загрузки, форм изменения данных или удаления;
+- формирует пример JSON-экспорта локально из
+  `frontend/src/data/demoDocument.js`.
+
+#### `AuthProvider`
+
+- проверяет access token через `jwt/verify/`;
+- при необходимости обновляет его через `jwt/refresh/`;
+- загружает `id` и `username` через `users/me/`;
+- хранит состояния `loading`, `authenticated`, `unauthenticated`;
+- очищает JWT и обновляет маршрутизацию при logout или неустранимом `401`.
+
+#### `AccountPage`
+
+- доступна только авторизованному пользователю;
+- показывает username из `AuthProvider`;
+- меняет пароль через Djoser endpoint `users/set_password/`;
+- проверяет совпадение новых паролей до запроса;
+- после успешной смены очищает форму и оставляет текущую JWT-сессию активной.
 
 #### `DocumentsPage`
 
@@ -266,6 +326,10 @@ React-приложение лежит в `frontend/`.
 - позволяет создать метку с цветом;
 - позволяет удалить метку.
 
+Пользовательские `documents`, `labels` и `annotations` доступны только через
+JWT-authenticated API. ViewSets используют `IsAuthenticated`, фильтруют
+queryset по владельцу и не открываются для публичного demo.
+
 ## 7. Основные пользовательские сценарии
 
 ### Авторизация
@@ -284,31 +348,50 @@ Authorization: Bearer <access_token>
 
 1. Пользователь вводит title и content.
 2. Frontend отправляет `multipart/form-data` на `/api/v1/documents/`.
-3. Backend создаёт `TextDocument` с `user=request.user`.
-4. Список документов обновляется.
+3. Backend подставляет `Новый документ`, если title пустой, и создаёт
+   уникальный пользовательский slug через `python-slugify`.
+4. Backend создаёт `TextDocument` с `user=request.user`.
+5. Список документов обновляется.
 
 ### Загрузка `.txt`
 
 1. Пользователь выбирает `.txt` файл.
-2. Frontend отправляет файл на `/api/v1/documents/upload/` в поле `file`.
-3. Backend проверяет наличие файла и расширение `.txt`.
-4. Backend читает файл как UTF-8.
-5. Backend создаёт документ, где `title` равен имени файла, а `content` — содержимому файла.
+2. Frontend читает файл как UTF-8 через `FileReader`.
+3. Frontend отправляет прочитанный текст как `content` в `multipart/form-data`
+   на `/api/v1/documents/`.
+4. Если title не указан, frontend сразу подставляет имя файла без расширения
+   `.txt`, но пользователь может изменить его до создания.
+5. Если одновременно выбран файл и введён ручной content, приоритет имеет файл.
+6. Frontend передаёт полное имя файла как `original_filename`; backend
+   генерирует slug и обеспечивает его уникальность.
+
+Backend endpoint `/api/v1/documents/upload/` с полем `file` сохраняется для
+прямых API-клиентов, но React-форма использует общий endpoint создания.
 
 ### Разбиение документа на chunks
 
 1. Frontend запрашивает `/api/v1/documents/{id}/chunks/?page=1&page_size=1`.
-2. Backend нормализует переносы строк к `\n`.
+2. Backend использует сохранённый `document.content` без преобразования строки.
 3. Backend ищет текстовые блоки, разделённые пустыми строками.
 4. Backend возвращает текущий chunk и абсолютные смещения `chunk_start`, `chunk_end`.
+
+При создании и обновлении документа переносы `\r\n` и `\r` нормализуются к
+`\n`. Chunk endpoint не выполняет повторную нормализацию, поэтому его offsets
+всегда относятся к той же строке, которую хранит документ.
 
 ### Создание аннотации
 
 1. Пользователь выделяет текст внутри текущего chunk.
-2. Frontend вычисляет локальные координаты выделения.
-3. Frontend переводит их в абсолютные координаты: `chunk_start + selection.start/end`.
-4. Frontend отправляет `document`, `label`, `start`, `end` на `/api/v1/annotations/`.
-5. Backend сохраняет аннотацию и вычисляет `text` по исходному документу.
+2. Frontend вычисляет локальные координаты DOM Range по длинам text nodes
+   внутри контейнера, включая уже подсвеченные `span`.
+3. Frontend сразу переводит координаты в абсолютные offsets относительно
+   полного `document.content`.
+4. Frontend вычисляет текст только как `document.content.slice(start, end)` и
+   отклоняет пустое, пробельное или выходящее за контейнер выделение.
+5. Frontend отправляет `document`, `label`, `start`, `end`, `text` на
+   `/api/v1/annotations/`.
+6. Backend проверяет ownership и границы, затем независимо вычисляет
+   сохраняемый `text` по исходному документу.
 
 ### Экспорт
 
@@ -318,12 +401,15 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "exported_at": "2026-01-01T00:00:00.000Z",
   "document": {
     "id": 1,
     "title": "Example",
-    "created_at": "..."
+    "slug": "example",
+    "original_filename": "Example.txt",
+    "created_at": "...",
+    "content": "Full document text"
   },
   "labels": [
     {"id": 1, "name": "Label", "color": "#ffff00"}
@@ -331,16 +417,22 @@ Authorization: Bearer <access_token>
   "annotations": [
     {
       "id": 1,
-      "document": 1,
-      "label": 1,
       "start": 0,
       "end": 10,
-      "text": "...",
+      "text": "Full docum",
+      "label": {"id": 1, "name": "Label", "color": "#ffff00"},
+      "label_id": 1,
       "created_at": "..."
     }
   ]
 }
 ```
+
+Экспорт использует сохранённый полный текст документа. Поле
+`annotations[].text` не копируется из API-ответа, а каждый раз вычисляется как
+`document.content.slice(annotation.start, annotation.end)`.
+Имя скачиваемого файла формируется как `{document.slug}_export.json`, с
+fallback `document_{document.id}_export.json`.
 
 ## 8. Текущие архитектурные ограничения
 
@@ -352,33 +444,26 @@ Authorization: Bearer <access_token>
 
 SQLite подходит для локальной разработки. Файл `backend/db.sqlite3` игнорируется Git и не должен использоваться как production-база.
 
-### 8.3. Метки глобальные
+### 8.3. Редактирование размеченного документа
 
-`Label` не связан с пользователем. Это может быть корректно для общего справочника, но небезопасно/неудобно для многопользовательского сервиса, если каждый пользователь должен иметь собственные метки.
+При изменении `document.content` существующие аннотации автоматически не
+пересчитываются. Старые offsets могут стать невалидными; этот сценарий требует
+отдельной продуктовой политики.
 
-### 8.4. Валидация аннотаций неполная
+### 8.4. Ограничение длины аннотации
 
-Нужно проверить и усилить:
+Поле `Annotation.text` имеет `max_length=500`. Длинные выделения требуют либо
+явной frontend/backend валидации, либо миграции поля на `TextField`.
 
-- принадлежность документа текущему пользователю при создании аннотации;
-- `start < end`;
-- `end <= len(document.content)`;
-- максимальную длину `text`, так как поле `Annotation.text` имеет `max_length=500`;
-- поведение при редактировании документа, когда старые offsets могут стать невалидными.
-
-### 8.5. Object permissions требуют ревью
-
-`IsAuthor` сейчас проверяет `obj.user == request.user`. Это подходит для `TextDocument`, но не подходит напрямую для `Annotation`, у которой нет поля `user`; владелец определяется через `annotation.document.user`.
-
-### 8.6. OpenAPI schema частично устарела
+### 8.5. OpenAPI schema частично устарела
 
 `backend/static/schema.yaml` не полностью отражает кастомные ответы `chunks`, `upload` и фактические статусы JWT endpoints. При любом API-изменении schema нужно обновить.
 
-### 8.7. Frontend API URL
+### 8.6. Frontend API URL
 
 `frontend/src/api/api.js` использует `REACT_APP_API_URL` с локальным fallback. Для deployment значение должно задаваться на этапе CRA-сборки.
 
-### 8.8. Нет отдельного backend export endpoint
+### 8.7. Нет отдельного backend export endpoint
 
 Экспорт JSON сейчас реализован на frontend-стороне. Это допустимо для MVP, но если нужен воспроизводимый API-контракт экспорта, стоит добавить backend endpoint.
 
@@ -418,9 +503,7 @@ postgres
 ## 10. Приоритеты перед публикацией как портфолио
 
 1. Вынести backend-настройки в `.env`.
-2. Исправить permissions/валидацию аннотаций.
-3. Определиться с моделью меток: глобальные или пользовательские.
-4. Обновить `backend/static/schema.yaml` и `docs/API_GUIDE.md`.
-5. Добавить Dockerfile/backend, Dockerfile/frontend, docker-compose, nginx config.
-6. Добавить базовые тесты API.
-7. Подготовить deployment и актуальный публичный demo URL.
+2. Обновить оставшиеся неточные части `backend/static/schema.yaml`.
+3. Добавить Dockerfile/backend, Dockerfile/frontend, docker-compose, nginx config.
+4. Расширить API и frontend test coverage.
+5. Подготовить deployment и актуальный публичный demo URL.

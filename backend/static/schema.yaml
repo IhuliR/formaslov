@@ -304,6 +304,12 @@ paths:
       responses:
         '204':
           description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelInUseError'
+          description: The label is referenced by one or more annotations.
       tags:
       - api
   /api/v1/annotations/:
@@ -450,7 +456,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TextDocument'
+              $ref: '#/components/schemas/TextDocumentUpload'
       responses:
         '201':
           content:
@@ -460,6 +466,64 @@ paths:
           description: ''
       tags:
       - api
+  /api/v1/users/:
+    post:
+      operationId: createUser
+      description: Create a user account through Djoser.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: User created.
+        '400':
+          description: Invalid username or password.
+      tags:
+      - auth
+  /api/v1/users/me/:
+    get:
+      operationId: retrieveCurrentUser
+      description: Return the authenticated user's id and username.
+      parameters: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: Current user.
+        '401':
+          description: Authentication credentials were not provided or are invalid.
+      tags:
+      - auth
+  /api/v1/users/set_password/:
+    post:
+      operationId: setCurrentUserPassword
+      description: Change the authenticated user's password through Djoser.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+      responses:
+        '204':
+          description: Password changed.
+        '400':
+          description: Invalid current password, mismatched passwords, or password validation failure.
+        '401':
+          description: Authentication credentials were not provided or are invalid.
+      tags:
+      - auth
   /api/v1/jwt/create/:
     post:
       operationId: createTokenObtainPair
@@ -558,6 +622,16 @@ components:
         title:
           type: string
           maxLength: 255
+          description: Human-readable title. Falls back to original_filename stem or Новый документ.
+        slug:
+          type: string
+          maxLength: 255
+          readOnly: true
+          description: Transliteration-based slug unique for the authenticated user.
+        original_filename:
+          type: string
+          maxLength: 255
+          description: Original uploaded filename, when the document was created from a file.
         content:
           type: string
         created_at:
@@ -566,8 +640,18 @@ components:
           readOnly: true
       required:
       - content
+    TextDocumentUpload:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+          description: UTF-8 encoded .txt file.
+      required:
+      - file
     Label:
       type: object
+      description: A label owned by the authenticated user. Names are unique per user.
       properties:
         id:
           type: integer
@@ -580,16 +664,37 @@ components:
           maxLength: 7
       required:
       - name
+    LabelInUseError:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: 'Нельзя удалить метку «зло»: она используется в 7 аннотациях. Сначала удалите или измените эти аннотации.'
+        code:
+          type: string
+          enum:
+          - label_in_use
+        annotations_count:
+          type: integer
+          minimum: 1
+          example: 7
+      required:
+      - detail
+      - code
+      - annotations_count
     Annotation:
       type: object
+      description: An annotation whose document and label must belong to the authenticated user.
       properties:
         id:
           type: integer
           readOnly: true
         document:
           type: integer
+          description: ID of a document owned by the authenticated user.
         label:
           type: integer
+          description: ID of a label owned by the authenticated user.
         start:
           type: integer
           maximum: 9223372036854775807
@@ -642,3 +747,42 @@ components:
           writeOnly: true
       required:
       - token
+    UserCreate:
+      type: object
+      properties:
+        username:
+          type: string
+          maxLength: 150
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - username
+      - password
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          maxLength: 150
+      required:
+      - username
+    PasswordChange:
+      type: object
+      properties:
+        current_password:
+          type: string
+          writeOnly: true
+        new_password:
+          type: string
+          writeOnly: true
+        re_new_password:
+          type: string
+          writeOnly: true
+      required:
+      - current_password
+      - new_password
+      - re_new_password

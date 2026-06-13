@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AnnotationList from '../components/AnnotationList';
 import ErrorMessage from '../components/ErrorMessage';
-import Header from '../components/Header';
 import Loader from '../components/Loader';
 import api from '../api/api';
+import {
+  buildDocumentExport,
+  getDocumentExportFilename,
+} from '../utils/export';
+import { getRangeTextOffsets, normalizeNewlines } from '../utils/text';
 
 const PAGE_SIZE = 1;
 
@@ -130,6 +134,7 @@ function DocumentPage() {
   const [error, setError] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
   const [markupMessage, setMarkupMessage] = useState('');
+  const [markupError, setMarkupError] = useState('');
 
   const labelsById = useMemo(() => {
     return labels.reduce((acc, label) => {
@@ -168,6 +173,7 @@ function DocumentPage() {
     setChunkStart(nextChunkStart);
     setChunkEnd(nextChunkEnd);
     setSelection(null);
+    setMarkupError('');
     clearBrowserSelection();
   }, [clearBrowserSelection]);
 
@@ -221,6 +227,7 @@ function DocumentPage() {
       setError('');
       setSaveMessage('');
       setMarkupMessage('');
+      setMarkupError('');
 
       try {
         const [documentResponse, labelsResponse, annotationsResponse, chunkResponse] = await Promise.all([
@@ -312,6 +319,7 @@ function DocumentPage() {
 
   const handleSelectionChange = () => {
     setMarkupMessage('');
+    setMarkupError('');
     const container = contentRef.current;
     const currentSelection = window.getSelection();
 
@@ -326,21 +334,26 @@ function DocumentPage() {
     }
 
     const range = currentSelection.getRangeAt(0);
-    if (!container.contains(range.commonAncestorContainer)) {
+    if (
+      !container.contains(range.startContainer) ||
+      !container.contains(range.endContainer)
+    ) {
       setSelection(null);
+      setMarkupError('Выделение должно находиться внутри текста документа');
       return;
     }
 
-    const startRange = range.cloneRange();
-    startRange.selectNodeContents(container);
-    startRange.setEnd(range.startContainer, range.startOffset);
-    const localStart = startRange.toString().length;
+    let offsets;
+    try {
+      offsets = getRangeTextOffsets(container, range);
+    } catch {
+      setSelection(null);
+      setMarkupError('Не удалось определить границы выделения');
+      return;
+    }
 
-    const endRange = range.cloneRange();
-    endRange.selectNodeContents(container);
-    endRange.setEnd(range.endContainer, range.endOffset);
-    const localEnd = endRange.toString().length;
-
+    const localStart = offsets.start;
+    const localEnd = offsets.end;
     if (
       !Number.isInteger(localStart) ||
       !Number.isInteger(localEnd) ||
@@ -349,13 +362,36 @@ function DocumentPage() {
       localEnd > chunkText.length
     ) {
       setSelection(null);
+      setMarkupError('Не удалось определить корректные границы выделения');
+      return;
+    }
+
+    const absoluteStart = chunkStart + localStart;
+    const absoluteEnd = chunkStart + localEnd;
+    const sourceContent = documentData?.content || '';
+    if (absoluteStart < 0 || absoluteEnd > sourceContent.length) {
+      setSelection(null);
+      setMarkupError('Выделение выходит за границы текста документа');
+      return;
+    }
+
+    const selectedText = sourceContent.slice(absoluteStart, absoluteEnd);
+    if (selectedText !== chunkText.slice(localStart, localEnd)) {
+      setSelection(null);
+      setMarkupError('Текст документа изменился. Обновите страницу');
+      return;
+    }
+
+    if (!selectedText.trim()) {
+      setSelection(null);
+      setMarkupError('Нельзя разметить пустой фрагмент или только пробелы');
       return;
     }
 
     setSelection({
-      start: localStart,
-      end: localEnd,
-      text: chunkText.slice(localStart, localEnd),
+      start: absoluteStart,
+      end: absoluteEnd,
+      text: selectedText,
     });
   };
 
@@ -393,7 +429,7 @@ function DocumentPage() {
     try {
       const formData = new FormData();
       formData.append('title', title);
-      formData.append('content', content);
+      formData.append('content', normalizeNewlines(content));
 
       const response = await api.patch(`documents/${documentId}/`, formData);
       if (response.data) {
@@ -410,23 +446,22 @@ function DocumentPage() {
 
   const handleAssignLabel = async (labelId) => {
     if (!selection || selection.start >= selection.end) {
-      setMarkupMessage('Сначала выделите фрагмент текста');
+      setMarkupError('Сначала выделите фрагмент текста');
       return;
     }
 
     setAssigning(true);
     setError('');
     setMarkupMessage('');
+    setMarkupError('');
 
     try {
-      const absoluteStart = chunkStart + selection.start;
-      const absoluteEnd = chunkStart + selection.end;
-
       const response = await api.post('annotations/', {
         document: documentId,
         label: labelId,
-        start: absoluteStart,
-        end: absoluteEnd,
+        start: selection.start,
+        end: selection.end,
+        text: selection.text,
       });
 
       if (response.data) {
@@ -456,47 +491,11 @@ function DocumentPage() {
   };
 
   const handleExport = () => {
-    const exportAnnotations = documentAnnotations.map((annotation) => {
-      const start = Number(annotation.start);
-      const end = Number(annotation.end);
-      let text = '';
-
-      if (
-        Number.isInteger(start) &&
-        Number.isInteger(end) &&
-        start >= 0 &&
-        end > start &&
-        typeof content === 'string'
-      ) {
-        text = content.slice(start, Math.min(end, content.length));
-      }
-
-      return {
-        id: annotation.id,
-        document: annotation.document,
-        label: annotation.label,
-        start: annotation.start,
-        end: annotation.end,
-        text,
-        created_at: annotation.created_at ?? null,
-      };
+    const exportData = buildDocumentExport({
+      documentData,
+      labels,
+      annotations: documentAnnotations,
     });
-
-    const exportData = {
-      schema_version: 1,
-      exported_at: new Date().toISOString(),
-      document: {
-        id: documentId,
-        title: title || '',
-        created_at: documentData?.created_at || null,
-      },
-      labels: labels.map((label) => ({
-        id: label.id,
-        name: label.name,
-        color: label.color,
-      })),
-      annotations: exportAnnotations,
-    };
 
     const blob = new Blob([JSON.stringify(exportData, null, 2)], {
       type: 'application/json;charset=utf-8',
@@ -504,7 +503,7 @@ function DocumentPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `document_${documentId}_export.json`;
+    link.download = getDocumentExportFilename(documentData);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -516,7 +515,6 @@ function DocumentPage() {
 
   return (
     <div className="page">
-      <Header />
       <main className="container">
         {loading ? (
           <Loader />
@@ -609,9 +607,10 @@ function DocumentPage() {
               </div>
               {selection ? (
                 <p className="selection-meta">
-                  Локальное выделение: {selection.start}-{selection.end}
+                  Абсолютное выделение: {selection.start}-{selection.end}
                 </p>
               ) : null}
+              <ErrorMessage message={markupError} />
             </div>
 
             <div className="section">
