@@ -164,7 +164,9 @@ class TextDocumentApiTests(TestCase):
         self.assertEqual(document.original_filename, 'example.txt')
         self.assertEqual(document.content, 'Добра\nи\nзла')
 
-    def test_chunks_use_offsets_from_stored_content_without_normalizing_it(self):
+    def test_chunks_use_offsets_from_stored_content_without_normalizing_it(
+            self
+    ):
         content = 'Первый\r\n\r\nВторой'
         document = TextDocument.objects.create(
             user=self.user,
