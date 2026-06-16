@@ -64,6 +64,7 @@ def assign_label_owners(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    atomic = False
 
     dependencies = [
         ('core', '0002_initial'),
@@ -84,6 +85,7 @@ class Migration(migrations.Migration):
         migrations.RunPython(
             assign_label_owners,
             reverse_code=migrations.RunPython.noop,
+            atomic=True,
         ),
         migrations.AlterField(
             model_name='label',
