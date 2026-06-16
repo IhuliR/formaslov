@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TransactionTestCase
 
 from core.management.commands.seed_demo_data import (
     DEMO_ANNOTATIONS,
@@ -15,7 +15,7 @@ from core.management.commands.seed_demo_data import (
 from core.models import Label, TextDocument
 
 
-class SeedDemoDataTests(TestCase):
+class SeedDemoDataTests(TransactionTestCase):
 
     def test_command_creates_and_restores_canonical_demo_data(self):
         call_command('seed_demo_data')
