@@ -58,6 +58,46 @@ test('opens a static read-only demo without creating auth tokens', async () => {
   expect(localStorage.getItem('refresh_token')).toBeNull();
 });
 
+test('opens the public about page and exposes shared navigation links', async () => {
+  window.history.pushState({}, '', '/about');
+  render(<App />);
+
+  expect(
+    await screen.findByRole('heading', { name: 'О проекте', level: 1 })
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole('heading', { name: 'Что уже умеет MVP' })
+  ).toBeInTheDocument();
+
+  const header = screen.getByRole('banner');
+  expect(header).toContainElement(
+    screen.getAllByRole('link', { name: 'Технологии' })[0]
+  );
+  expect(header).toContainElement(screen.getByRole('link', { name: 'Демо' }));
+
+  const footer = screen.getByRole('contentinfo');
+  expect(footer).toContainElement(
+    screen.getAllByRole('link', { name: 'О проекте' })[1]
+  );
+});
+
+test('opens the public technologies page without authentication', async () => {
+  window.history.pushState({}, '', '/technologies');
+  render(<App />);
+
+  expect(
+    await screen.findByRole('heading', {
+      name: 'Технологии и реализация',
+      level: 1,
+    })
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole('heading', { name: 'Работа с AI-инструментами' })
+  ).toBeInTheDocument();
+  expect(screen.getByText('Django REST Framework')).toBeInTheDocument();
+  expect(localStorage.getItem('access_token')).toBeNull();
+});
+
 test('redirects an unauthenticated user from documents to login', async () => {
   window.history.pushState({}, '', '/documents');
   render(<App />);

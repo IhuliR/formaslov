@@ -10,22 +10,50 @@ function Header() {
         <Link to="/" className="brand-link">
           Formaslov
         </Link>
-        {isAuthenticated ? (
-          <nav className="app-nav" aria-label="Рабочая навигация">
+        <nav className="app-nav" aria-label="Основная навигация">
+          {isAuthenticated ? (
+            <>
+              <NavLink
+                to="/documents"
+                className={({ isActive }) =>
+                  `nav-link${isActive ? ' active' : ''}`
+                }
+              >
+                Документы
+              </NavLink>
+              <NavLink
+                to="/labels"
+                className={({ isActive }) =>
+                  `nav-link${isActive ? ' active' : ''}`
+                }
+              >
+                Метки
+              </NavLink>
+            </>
+          ) : null}
+          <NavLink
+            to="/about"
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
+            О проекте
+          </NavLink>
+          <NavLink
+            to="/technologies"
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
+            Технологии
+          </NavLink>
+          {!isAuthenticated ? (
             <NavLink
-              to="/documents"
-              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+              to="/demo"
+              className={({ isActive }) =>
+                `nav-link${isActive ? ' active' : ''}`
+              }
             >
-              Документы
+              Демо
             </NavLink>
-            <NavLink
-              to="/labels"
-              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-            >
-              Метки
-            </NavLink>
-          </nav>
-        ) : null}
+          ) : null}
+        </nav>
       </div>
       {!isLoading ? (
         <nav className="header-actions" aria-label="Пользователь">

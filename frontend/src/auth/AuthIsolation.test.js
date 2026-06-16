@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import App from '../App';
 import api, { getCurrentUser, verifyAccessToken } from '../api/api';
 
@@ -44,6 +50,23 @@ test('logout removes labels from the UI and clears user tokens', async () => {
   expect(
     screen.getByRole('link', { name: 'Сменить пароль' })
   ).toHaveAttribute('href', '/account');
+  const header = within(screen.getByRole('banner'));
+  expect(header.getByRole('link', { name: 'Документы' })).toHaveAttribute(
+    'href',
+    '/documents'
+  );
+  expect(header.getByRole('link', { name: 'Метки' })).toHaveAttribute(
+    'href',
+    '/labels'
+  );
+  expect(header.getByRole('link', { name: 'О проекте' })).toHaveAttribute(
+    'href',
+    '/about'
+  );
+  expect(header.getByRole('link', { name: 'Технологии' })).toHaveAttribute(
+    'href',
+    '/technologies'
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
 
   await waitFor(() => {

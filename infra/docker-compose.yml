@@ -1,0 +1,49 @@
+volumes:
+  pg_data:
+  static:
+  media:
+
+services:
+  db:
+    image: postgres:13.10
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  backend:
+    image: ${DOCKER_USERNAME}/formaslov_backend:latest
+    env_file:
+      - .env
+    volumes:
+      - static:/backend_static
+      - media:/app/media
+    depends_on:
+      - db
+  frontend:
+    image: ${DOCKER_USERNAME}/formaslov_frontend:latest
+    command: cp -r /app/build/. /frontend_static/
+    volumes:
+      - static:/frontend_static
+  gateway:
+    image: ${DOCKER_USERNAME}/formaslov_gateway:latest
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME}
+      DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
+    volumes:
+      - static:/static/
+      - media:/media/
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      default:
+      web:
+        aliases:
+          - formaslov_gateway
+
+networks:
+  default:
+  web:
+    external: true

@@ -1,0 +1,190 @@
+name: Main Formaslov workflow
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend_test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:13.10
+        env:
+          POSTGRES_USER: django_user
+          POSTGRES_PASSWORD: django_password
+          POSTGRES_DB: django_db
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip 
+          pip install -r backend/requirements.txt 
+          pip install flake8
+
+      - name: Test backend with flake8 and Django
+        env:
+          SECRET_KEY: test-secret-key 
+          DEBUG: "False" 
+          POSTGRES_USER: django_user 
+          POSTGRES_PASSWORD: django_password 
+          POSTGRES_DB: django_db 
+          DB_HOST: localhost 
+          DB_PORT: "5432"
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          CSRF_TRUSTED_ORIGINS: http://localhost,http://127.0.0.1
+          CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+        run: |
+          python -m flake8 backend/
+          cd backend/
+          python manage.py test
+  
+  build_backend_and_push_to_docker_hub:
+    name: Push backend Docker image to DockerHub
+    runs-on: ubuntu-latest
+    needs: backend_test
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Push to DockerHub
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend/
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/formaslov_backend:latest
+    
+  frontend_tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up nodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd frontend/
+          npm ci --legacy-peer-deps
+          CI=true npm test -- --watchAll=false
+  
+  build_frontend_and_push_to_docker_hub:
+    name: Push frontend Docker image to DockerHub
+    runs-on: ubuntu-latest
+    needs: frontend_tests
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Push to DockerHub
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend/
+          push: true
+          build-args: |
+            REACT_APP_API_URL=/api/v1/
+          tags: ${{ secrets.DOCKER_USERNAME }}/formaslov_frontend:latest
+  
+  build_gateway_and_push_to_docker_hub:
+    name: Push gateway Docker image to DockerHub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Push to DockerHub
+        uses: docker/build-push-action@v6
+        with:
+          context: ./nginx/
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/formaslov_gateway:latest
+  
+  deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - build_backend_and_push_to_docker_hub
+      - build_frontend_and_push_to_docker_hub
+      - build_gateway_and_push_to_docker_hub
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      
+      - name: Copy docker-compose.yml via ssh
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "infra/docker-compose.yml"
+          target: "/opt/projects/formaslov/"
+          strip_components: 1
+          overwrite: true
+
+      - name: Executing remote ssh commands to deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /opt/projects/formaslov/
+            sudo docker compose -f docker-compose.yml pull
+            sudo docker compose -f docker-compose.yml down
+            sudo docker compose -f docker-compose.yml up -d 
+            sleep 5
+            sudo docker compose -f docker-compose.yml exec -T backend python manage.py migrate --noinput
+            sudo docker compose -f docker-compose.yml exec -T backend python manage.py collectstatic --noinput
+  
+  send_message:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps: 
+      - name: send_message
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            Деплой Formaslov выполнен успешно!
+            Автор: ${{ github.actor }}
+            Коммит: ${{ github.event.commits[0].message }} https://github.com/${{ github.repository }}/commit/${{ github.sha }}

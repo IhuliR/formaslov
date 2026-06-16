@@ -7,7 +7,7 @@ import {
 } from '../auth/tokenStorage';
 
 const baseURL =
-  process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000/api/v1/';
+  process.env.REACT_APP_API_URL || '/api/v1/';
 
 const api = axios.create({ baseURL });
 const authApi = axios.create({ baseURL });

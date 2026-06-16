@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+
 function Footer() {
   return (
     <footer className="app-footer">
@@ -14,6 +16,8 @@ function Footer() {
 
         <div className="footer-meta">
           <nav className="footer-links" aria-label="Ссылки проекта">
+            <Link to="/about">О проекте</Link>
+            <Link to="/technologies">Технологии</Link>
             <a
               href="https://github.com/IhuliR"
               target="_blank"
