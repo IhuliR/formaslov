@@ -1,25 +1,75 @@
 # Formaslov
 
-Formaslov is an MVP web application for manual text annotation. Users can
-register or sign in with JWT, create or upload text documents, assign labels
-to selected ranges, and export annotations as JSON.
+**Formaslov** — MVP веб-приложения для ручной разметки текстов.
 
-## Stack
+Сервис позволяет регистрироваться, загружать или создавать текстовые документы, выделять фрагменты текста, назначать им метки и экспортировать результат разметки в JSON.
 
-- Django, Django REST Framework, Djoser, Simple JWT
-- React (Create React App), Axios
-- SQLite for local development
+Проект задеплоен и доступен по адресу:
 
-## Repository structure
+**https://forma-slov.ru**
+
+## О проекте
+
+Formaslov задуман как прототип инструмента для качественного анализа текстов и ручной аннотации данных. Он может быть полезен для исследовательских, социологических, гуманитарных и образовательных задач, где важно не просто хранить текст, а структурировать его через систему пользовательских меток.
+
+Текущая версия — MVP: приложение уже поддерживает основные пользовательские сценарии, но остаётся пространством для дальнейшего развития интерфейса, аналитических функций и инструментов совместной работы.
+
+## Возможности
+
+* регистрация и вход пользователя;
+* JWT-авторизация;
+* создание текстового документа вручную;
+* загрузка `.txt`-файла;
+* просмотр документа по фрагментам;
+* создание пользовательских меток;
+* выделение фрагментов текста;
+* назначение меток выделенным фрагментам;
+* удаление меток и аннотаций;
+* экспорт разметки в JSON;
+* демо-режим без регистрации;
+* личный кабинет и смена пароля.
+
+Документы, метки и аннотации привязаны к аккаунту пользователя. Анонимные пользователи могут смотреть публичные страницы и демо, но не могут создавать или изменять данные через API.
+
+## Стек
+
+### Backend
+
+* Python
+* Django
+* Django REST Framework
+* Djoser
+* Simple JWT
+* PostgreSQL
+* Gunicorn
+
+### Frontend
+
+* React
+* Create React App
+* Axios
+* HTML/CSS
+
+### Инфраструктура
+
+* Docker
+* Docker Compose
+* Nginx
+* общий reverse proxy для нескольких проектов на одном сервере
+* HTTPS через Let's Encrypt / Certbot
+* GitHub Actions для CI/CD
+* Docker Hub для хранения образов
+
+## Структура репозитория
 
 ```text
-backend/   Django project and applications
-frontend/  React application
-docs/      Architecture, API, style, and maintainer guides
-demo/      Static browser-only demo
+backend/   Django-проект и backend-приложения
+frontend/  React-приложение
+docs/      Документация по архитектуре, API, стилю и работе с проектом
+demo/      Статическая браузерная демо-версия
 ```
 
-## Local setup
+## Локальный запуск
 
 ### Backend
 
@@ -32,7 +82,11 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-The API is available at `http://127.0.0.1:8000/api/v1/`.
+API будет доступно по адресу:
+
+```text
+http://127.0.0.1:8000/api/v1/
+```
 
 ### Frontend
 
@@ -42,93 +96,126 @@ npm install
 npm start
 ```
 
-The interface is available at `http://localhost:3000`.
+Интерфейс будет доступен по адресу:
 
-To override frontend values, create `frontend/.env` using the relevant
-`REACT_APP_*` lines from [`.env.example`](.env.example). CRA reads them at
-build time.
+```text
+http://localhost:3000
+```
 
-## User flow
+Для переопределения frontend-настроек можно создать файл `frontend/.env` и использовать переменные `REACT_APP_*` из `.env.example`.
 
-Public routes:
+Важно: Create React App читает `REACT_APP_*` переменные на этапе сборки frontend-приложения.
 
-- `/` — landing page with a short product explanation
-- `/demo` — static read-only product demo; no account or API data required
-- `/login` — JWT login
-- `/register` — account registration through Djoser
+## Основные маршруты
 
-Protected routes:
+Публичные страницы:
 
-- `/documents` — the current user's documents
-- `/documents/:id` — document annotation workspace
-- `/labels` — label management
-- `/account` — current username and password change form
+* `/` — главная страница с описанием проекта;
+* `/demo` — статическое демо без регистрации и обращения к API;
+* `/login` — вход пользователя;
+* `/register` — регистрация пользователя.
 
-Registration uses `POST /api/v1/users/`. After registration, the user is sent
-to `/login`. Login uses `POST /api/v1/jwt/create/`. Logout removes the access
-and refresh tokens from browser storage and returns to `/`. The frontend loads
-the signed-in username from `GET /api/v1/users/me/`. Password changes use
-`POST /api/v1/users/set_password/` and keep the current JWT session active.
+Страницы для авторизованных пользователей:
 
-## Main workflows
+* `/documents` — список документов текущего пользователя;
+* `/documents/:id` — рабочая область разметки документа;
+* `/labels` — управление метками;
+* `/account` — страница аккаунта и смена пароля.
 
-- Public landing and read-only demo
-- Registration, JWT login, and refresh
-- Create a document from manual content or a UTF-8 `.txt` file
-- Browse document chunks
-- Create and delete labels and annotations
-- Export annotations to JSON in the browser
+## Пользовательский сценарий
 
-The document form accepts either manual content or a `.txt` file. When both
-are provided, the file content takes priority. If the title is empty, the
-uploaded file name without the `.txt` extension is used.
+Пользователь может зарегистрироваться, войти в аккаунт, создать документ или загрузить `.txt`-файл, выделить нужные фрагменты текста и назначить им метки.
 
-API details and current limitations are documented in [`docs/API_GUIDE.md`](docs/API_GUIDE.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+После завершения разметки пользователь может экспортировать аннотации в JSON. Экспорт выполняется в браузере.
 
-User documents, labels, and annotations require JWT authentication and are
-filtered by the current account. Anonymous users cannot read or mutate these
-resources through the API.
+Если при создании документа одновременно указан ручной текст и загружен файл, приоритет отдаётся содержимому файла. Если название документа не указано, используется имя загруженного файла без расширения `.txt`.
 
-## Read-only demo
+## API
 
-The `Попробовать демо` action opens `/demo`. The page uses static data from
-`frontend/src/data/demoDocument.js`, does not request JWT tokens, and does not
-send data to the backend. Its JSON export is generated and downloaded entirely
-in the browser.
+Основные сценарии API:
 
-There is no shared public demo-account flow and no frontend demo credentials.
-To upload texts, manage labels, create annotations, or work with personal
-documents, a user must register or sign in.
+* регистрация пользователя;
+* получение JWT-токена;
+* обновление JWT-токена;
+* получение данных текущего пользователя;
+* смена пароля;
+* работа с документами;
+* работа с метками;
+* работа с аннотациями;
+* экспорт данных.
 
-Anonymous visitors see registration and login actions on `/demo`. Signed-in
-users keep the same read-only demo content, but the header shows workspace and
-account navigation and the page links back to their documents.
+Подробности API и архитектурные ограничения описаны в документации:
 
-## Optional local sample data
+* [`docs/API_GUIDE.md`](docs/API_GUIDE.md)
+* [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
-The backend retains `seed_demo_data` as a development/admin utility. It is not
-used by `/demo` and should not be exposed as a shared public account. To create
-or reset local sample records:
+## Демо-режим
+
+Кнопка «Попробовать демо» открывает маршрут `/demo`.
+
+Демо-страница использует статические данные из:
+
+```text
+frontend/src/data/demoDocument.js
+```
+
+Она не требует регистрации, не использует JWT-токены и не отправляет данные на backend. Экспорт JSON в демо-режиме формируется полностью на стороне браузера.
+
+Для загрузки собственных текстов, создания документов, управления метками и сохранения разметки пользователь должен зарегистрироваться или войти в аккаунт.
+
+## Локальные demo-данные
+
+В backend сохранена management-команда `seed_demo_data`. Она используется только как локальная development/admin-утилита и не является публичным demo-аккаунтом.
+
+Чтобы создать или сбросить локальные demo-данные:
 
 ```bash
 cd backend
 python manage.py seed_demo_data
 ```
 
-Optional environment variables:
+Дополнительные переменные окружения:
 
 ```env
 DEMO_USERNAME=demo
 DEMO_PASSWORD=demo
 ```
 
-The project does not auto-load the root `.env.example`; export these backend
-values in the shell before running the command.
+Проект не загружает `.env.example` автоматически. Для использования этих значений их нужно передать в окружение перед запуском команды.
 
-## Standalone static demo
+## Статическая demo-версия
 
-The tracked `demo/` directory also contains a standalone browser-only artifact.
-The React application route `/demo` is the canonical in-app demo flow.
+В директории `demo/` также хранится standalone browser-only демо-артефакт.
+
+Основным demo-сценарием внутри приложения является маршрут:
+
+```text
+/demo
+```
+
+## Деплой
+
+Проект развёрнут на VPS с использованием Docker Compose.
+
+В production используются:
+
+* backend-контейнер с Django/Gunicorn;
+* frontend build;
+* внутренний gateway-контейнер Nginx;
+* PostgreSQL;
+* общий внешний reverse proxy Nginx;
+* HTTPS-сертификат Let's Encrypt;
+* CI/CD через GitHub Actions.
+
+Сайт доступен по адресу:
+
+**https://forma-slov.ru**
+
+## Автор
+
+Проект разработан как учебный и портфолио-проект backend-разработчика.
+
+Основной акцент сделан на backend-архитектуре, API, работе с данными, авторизации, контейнеризации и production-деплое.
 
 ## License
 
