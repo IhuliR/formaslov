@@ -2,13 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import ErrorMessage from '../components/ErrorMessage';
-
-const getErrorMessage = (error) => {
-  if (error?.response?.data) {
-    return JSON.stringify(error.response.data);
-  }
-  return 'Не удалось войти. Проверьте соединение с сервером.';
-};
+import { getAuthErrorMessage } from '../utils/apiErrors';
 
 function LoginPage() {
   const { login } = useAuth();
@@ -32,7 +26,7 @@ function LoginPage() {
     try {
       await signIn(username, password);
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      setError(getAuthErrorMessage(requestError));
     } finally {
       setIsLoading(false);
     }
